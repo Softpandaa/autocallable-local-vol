@@ -31,11 +31,11 @@ def fit_curves():
     last = spot.iloc[-1]
     fitted = {}
     for name in INDICES:
-        rate = rates.get_r_func(str(OIS_FILE[name]), OIS_BASIS[name])
+        rate = rates.get_r_func(OIS_FILE[name], OIS_BASIS[name])
         chains, table = surface.get_processed_data(
-            str(CHAIN_FILE[name]), last[name], rate, STRIKE_STEP[name])
-        implied_all = surface.get_vol_sur_M_all(chains, table)
-        local_all = surface.get_loc_vol_sur_M_all(chains, table)
+            CHAIN_FILE[name], last[name], rate, STRIKE_STEP[name])
+        implied_all = surface.get_vol_sur_M_all(chains, table, "IV", "sig_ATMF")
+        local_all = surface.get_vol_sur_M_all(chains, table, "LV", "LV_ATMF")
         implied, _ = _drop(implied_all, table, DROP_IMPLIED[name])
         local, local_table = _drop(local_all, table, DROP_LOCAL[name])
         fitted[name] = {"rate": rate, "spot": last[name],
@@ -47,20 +47,15 @@ def fit_curves():
 
 
 def surface_families(entry):
-    """The six surfaces the report compares, as volatility on a moneyness grid.
-
-    Two interpolations across maturity, cubic and linear, applied to the implied
-    curves, to the Dupire local curves, and to Gatheral's mapping of the implied
-    curves. Section 4.2 selects Dupire with linear interpolation.
-    """
+    """The six candidate surfaces of Section 4.2, as volatility on the moneyness grid."""
     moneyness = np.linspace(*MONEYNESS_GRID)
     maturity = np.linspace(*MATURITY_GRID)
     y = np.log(moneyness)
     raw = {
-        "implied_cubic": surface.get_IV_M_T_Cubic(entry["implied"], y, maturity),
-        "implied_linear": surface.get_IV_M_T_Linear(entry["implied"], y, maturity),
-        "dupire_cubic": surface.get_IV_M_T_Cubic(entry["local"], y, maturity),
-        "dupire_linear": surface.get_IV_M_T_Linear(entry["local"], y, maturity),
+        "implied_cubic": surface.interp_cubic(entry["implied"], y, maturity),
+        "implied_linear": surface.interp_linear(entry["implied"], y, maturity),
+        "dupire_cubic": surface.interp_cubic(entry["local"], y, maturity),
+        "dupire_linear": surface.interp_linear(entry["local"], y, maturity),
         "gatheral_cubic": surface.get_local_vol(entry["implied"], y, maturity, True),
         "gatheral_linear": surface.get_local_vol(entry["implied"], y, maturity, False),
     }
@@ -69,15 +64,15 @@ def surface_families(entry):
                 for k, v in raw.items()}
 
 
-def blank_share(frame):
-    """Fraction of the traded moneyness window where the fit gives no real volatility.
-
-    Restricted to MONEYNESS_WINDOW, so this is the quantity Table 1 reports.
-    Outside that window the fitted curve is pure extrapolation.
-    """
+def window(frame):
+    """The columns of frame inside MONEYNESS_WINDOW."""
     low, high = MONEYNESS_WINDOW
-    window = frame.loc[:, (frame.columns >= low) & (frame.columns <= high)]
-    return float(np.isnan(window.to_numpy()).mean())
+    return frame.loc[:, (frame.columns >= low) & (frame.columns <= high)]
+
+
+def blank_share(frame):
+    """Share of the moneyness window with no real volatility, Table 1."""
+    return float(np.isnan(window(frame).to_numpy()).mean())
 
 
 def project_paths(spot, fitted):
@@ -91,6 +86,7 @@ def project_paths(spot, fitted):
 
 
 def coupon_grid(paths, rate):
+    """Coupon strike over the grid of maximum and minimum interest, Table 2."""
     relative = np.array([paths[name] / paths[name][0, 0] for name in INDICES])
     parts = note.structure(np.min(relative, axis=0), rate)
     rows = np.linspace(*MAX_INTEREST)
@@ -101,7 +97,6 @@ def coupon_grid(paths, rate):
 
 
 if __name__ == "__main__":
-    pd.set_option("display.width", 250)
     spot, fitted = fit_curves()
     for name, entry in fitted.items():
         families = surface_families(entry)

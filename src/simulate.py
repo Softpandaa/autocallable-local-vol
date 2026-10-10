@@ -5,18 +5,20 @@ import pandas as pd
 
 from config import (CORRELATION_ORDER, INDICES, PATHS, SEEDS, SPOT_FILE, STEPS,
                     TICKER, TRADING_DAYS_PER_YEAR)
-from surface import get_IV_M_T_Linear
+from surface import interp_linear
 
 
 def load_spot():
     """Daily closes of the three indices, columns renamed to the index names."""
     frame = pd.read_csv(SPOT_FILE, index_col=0, parse_dates=True).dropna()
-    return frame.rename(columns={TICKER[name]: name for name in INDICES})[list(CORRELATION_ORDER)]
+    frame = frame.rename(columns={TICKER[name]: name for name in INDICES})
+    return frame[list(CORRELATION_ORDER)]
 
 
 def cholesky_factor(spot):
     """Lower Cholesky factor of the daily log return correlation matrix."""
-    returns = np.log(spot[list(CORRELATION_ORDER)] / spot[list(CORRELATION_ORDER)].shift(1)).dropna()
+    spot = spot[list(CORRELATION_ORDER)]
+    returns = np.log(spot / spot.shift(1)).dropna()
     return np.linalg.cholesky(returns.corr().to_numpy())
 
 
@@ -32,21 +34,15 @@ def driving_noise(factor):
 
 
 def project(spot_0, rate, dividend, local_surface, grid, noise):
-    """Index paths under the local volatility surface.
-
-    The surface is a function of log forward moneyness, ln(K / F), the same
-    argument the curves were fitted on, so the path level enters as the strike.
-
-    Where the interpolated local variance is negative, it is replaced by the
-    smallest non negative value seen so far, as the report states.
-    """
-    floor = 1.0
+    """Index paths of equation (5), the local variance interpolated linearly across maturity."""
+    floor = 1.0  # smallest non-negative variance so far, at most 1; replaces negative ones
     path = np.full((PATHS, STEPS + 1), spot_0)
     forward = spot_0 * np.exp((rate(grid) - dividend(grid)) * grid)
     step = 1 / TRADING_DAYS_PER_YEAR
     for j in range(1, path.shape[1]):
         forward_rate = (grid[j] * rate(grid[j]) - grid[j - 1] * rate(grid[j - 1])) / step
-        variance = get_IV_M_T_Linear(
+        # The curves were fitted in ln(K / F), so the path level enters as the strike.
+        variance = interp_linear(
             local_surface, np.log(path[:, j - 1] / forward[j - 1]), grid[j - 1])
         valid = variance >= 0
         if valid.any():
