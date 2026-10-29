@@ -14,10 +14,9 @@ No coupon strike prices the note at 98% of issue at the contractual rates of 2% 
 data/     committed option chains, rate curves and spot history
 src/      analysis modules, every parameter declared once in config.py
 report.pdf
-slides.pdf
 ```
 
-The report and slides are distributed as compiled PDFs. Their typesetting source is not included.
+The report is distributed as a compiled PDF. Its typesetting source is not included.
 
 ## Data
 
